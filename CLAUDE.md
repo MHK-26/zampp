@@ -13,12 +13,15 @@ zampp is an open-source, better XAMPP: a local web development stack manager
 
 ## Commands
 ```bash
-npm install
-npm run dev        # API + UI dev servers
-npm test           # unit + integration tests
-npm run typecheck
-node bin/zampp.ts doctor|start|stop|status|site add <name> <path>
+npm install && npm --prefix ui install
+npm run dev        # API on 127.0.0.1:1980 (foreground)
+npm run dev:ui     # Vite dev server proxying /api and /ws
+npm run build:ui   # production panel into ui/dist (served by the API)
+npm test           # node --test: unit + API tests, ZAMPP_HOME is a temp dir
+npm run typecheck  # daemon + ui
+node bin/zampp.ts doctor|start|stop|status|ui|site add <name> <path>
 ```
+Set `ZAMPP_SKIP_HOSTS=1` in tests/CI to avoid the hosts-file admin prompt.
 
 ## Engineering process (from ECC — Everything Claude Code)
 Vendored under `.claude/` (pinned commits in `.claude/*_COMMIT`):

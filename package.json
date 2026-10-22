@@ -5,8 +5,12 @@
   "license": "MIT",
   "type": "module",
   "private": false,
-  "engines": { "node": ">=24" },
-  "bin": { "zampp": "./bin/zampp.ts" },
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "zampp": "./bin/zampp.ts"
+  },
   "scripts": {
     "start": "node bin/zampp.ts ui",
     "dev": "node bin/zampp.ts serve --dev",
@@ -25,5 +29,38 @@
     "@types/node": "^24.0.0",
     "@types/ws": "^8.5.12",
     "typescript": "^5.9.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MHK-26/zampp.git"
+  },
+  "homepage": "https://github.com/MHK-26/zampp#readme",
+  "bugs": {
+    "url": "https://github.com/MHK-26/zampp/issues"
+  },
+  "keywords": [
+    "xampp",
+    "mamp",
+    "laragon",
+    "lamp",
+    "local-development",
+    "apache",
+    "php",
+    "mariadb",
+    "mysql",
+    "mailpit",
+    "adminer",
+    "mkcert",
+    "dev-stack",
+    "control-panel"
+  ],
+  "author": "MHK-26",
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "ui/dist",
+    "README.md",
+    "LICENSE"
+  ]
 }
