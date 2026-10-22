@@ -1,0 +1,29 @@
+{
+  "name": "zampp",
+  "version": "0.1.0",
+  "description": "The open-source, secure-by-default XAMPP: Apache + PHP-FPM + MariaDB + Mailpit + Adminer with a web control panel and CLI.",
+  "license": "MIT",
+  "type": "module",
+  "private": false,
+  "engines": { "node": ">=24" },
+  "bin": { "zampp": "./bin/zampp.ts" },
+  "scripts": {
+    "start": "node bin/zampp.ts ui",
+    "dev": "node bin/zampp.ts serve --dev",
+    "dev:ui": "npm --prefix ui run dev",
+    "build:ui": "npm --prefix ui run build",
+    "test": "node --test --experimental-strip-types 'tests/**/*.test.ts'",
+    "test:e2e": "ZAMPP_E2E=1 node --test 'tests/e2e/**/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm --prefix ui run typecheck",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.9.0"
+  }
+}
