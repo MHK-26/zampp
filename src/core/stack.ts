@@ -1,7 +1,7 @@
 import type { AppContext } from './context.ts'
 import type { Supervisor } from './supervisor.ts'
 import { ensurePhp, requiredPhpVersions } from './php.ts'
-import { ensureAdminer } from './www.ts'
+import { ensureAdminer, ensurePhpMyAdmin } from './www.ts'
 import { PHP_FPM_PREFIX } from './services/index.ts'
 import type { ProgressFn } from './provision.ts'
 import type { ServiceStatus } from './services/types.ts'
@@ -18,6 +18,11 @@ export interface StackResult {
 export async function ensureProvisioned(ctx: AppContext, sup: Supervisor, progress: ProgressFn = () => {}): Promise<void> {
   await ensurePhp(ctx, progress)
   await ensureAdminer(ctx, progress)
+  try {
+    await ensurePhpMyAdmin(ctx, progress)
+  } catch (error: unknown) {
+    progress(`phpMyAdmin not installed: ${error instanceof Error ? error.message : String(error)} (Adminer still works)`)
+  }
   for (const id of ['mailpit', 'mariadb', 'apache']) {
     const service = sup.find(id)
     if ((await service.resolve(ctx)) === null) await sup.install(id, progress)

@@ -35,8 +35,11 @@ export function Database({ status, notify }: PageProps) {
               {reveal ? 'Hide password' : 'Show password'}
             </button>
             <CopyButton value={creds.password} label="Copy password" />
-            <a className="btn sm primary" href={status.urls.adminer} target="_blank" rel="noreferrer">
-              Open Adminer ↗
+            <a className="btn sm primary" href={status.urls.phpmyadmin} target="_blank" rel="noreferrer">
+              Open phpMyAdmin ↗
+            </a>
+            <a className="btn sm" href={status.urls.adminer} target="_blank" rel="noreferrer">
+              Adminer ↗
             </a>
           </div>
           <p className="muted" style={{ marginTop: 12 }}>

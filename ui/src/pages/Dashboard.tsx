@@ -65,9 +65,9 @@ export function Dashboard({ status, refresh, notify, go }: PageProps & { go: (r:
             <h3>localhost</h3>
             <div className="meta">Welcome page and your files in {status.home}/www</div>
           </a>
-          <a className="card" href={status.urls.adminer} target="_blank" rel="noreferrer">
-            <h3>Adminer</h3>
-            <div className="meta">Database UI, 127.0.0.1:{status.settings.db.port}</div>
+          <a className="card" href={status.urls.phpmyadmin} target="_blank" rel="noreferrer">
+            <h3>phpMyAdmin</h3>
+            <div className="meta">Logged in as root. Adminer at /adminer/ too.</div>
           </a>
           <a className="card" href={status.urls.mail} target="_blank" rel="noreferrer">
             <h3>Mailpit</h3>

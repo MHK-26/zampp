@@ -84,6 +84,13 @@ export function Settings({ status, refresh, notify }: PageProps) {
                 <input type="number" value={form.db.port} onChange={(e) => setForm({ ...form, db: { ...form.db, port: num(e.target.value) } })} />
               </div>
               <div className="field">
+                <label>Database engine</label>
+                <select value={form.db.engine} onChange={(e) => setForm({ ...form, db: { ...form.db, engine: e.target.value as 'mariadb' | 'mysql' } })}>
+                  <option value="mariadb">MariaDB (what XAMPP ships)</option>
+                  <option value="mysql">Oracle MySQL (brew install mysql)</option>
+                </select>
+              </div>
+              <div className="field">
                 <label>SMTP (Mailpit)</label>
                 <input type="number" value={form.mail.smtpPort} onChange={(e) => setForm({ ...form, mail: { ...form.mail, smtpPort: num(e.target.value) } })} />
               </div>

@@ -17,14 +17,24 @@ interface DbInstall {
   readonly source: string
 }
 
-export async function findDatabase(): Promise<DbInstall | null> {
-  const mariadb = await brewPrefix('mariadb')
-  if (mariadb && (await exists(join(mariadb, 'bin', 'mariadbd')))) {
-    return { server: join(mariadb, 'bin', 'mariadbd'), client: join(mariadb, 'bin', 'mariadb'), installDb: join(mariadb, 'bin', 'mariadb-install-db'), flavour: 'mariadb', source: 'homebrew' }
+/** Preferred engine first (Settings → Database), then whatever else is installed. */
+export async function findDatabase(preferred: 'mariadb' | 'mysql' = 'mariadb'): Promise<DbInstall | null> {
+  const lookups: Record<'mariadb' | 'mysql', () => Promise<DbInstall | null>> = {
+    mariadb: async () => {
+      const prefix = await brewPrefix('mariadb')
+      if (!prefix || !(await exists(join(prefix, 'bin', 'mariadbd')))) return null
+      return { server: join(prefix, 'bin', 'mariadbd'), client: join(prefix, 'bin', 'mariadb'), installDb: join(prefix, 'bin', 'mariadb-install-db'), flavour: 'mariadb', source: 'homebrew' }
+    },
+    mysql: async () => {
+      const prefix = await brewPrefix('mysql')
+      if (!prefix || !(await exists(join(prefix, 'bin', 'mysqld')))) return null
+      return { server: join(prefix, 'bin', 'mysqld'), client: join(prefix, 'bin', 'mysql'), installDb: null, flavour: 'mysql', source: 'homebrew' }
+    },
   }
-  const mysql = await brewPrefix('mysql')
-  if (mysql && (await exists(join(mysql, 'bin', 'mysqld')))) {
-    return { server: join(mysql, 'bin', 'mysqld'), client: join(mysql, 'bin', 'mysql'), installDb: null, flavour: 'mysql', source: 'homebrew' }
+  const order: ('mariadb' | 'mysql')[] = preferred === 'mysql' ? ['mysql', 'mariadb'] : ['mariadb', 'mysql']
+  for (const engine of order) {
+    const found = await lookups[engine]()
+    if (found) return found
   }
   const mariadbd = await which('mariadbd')
   if (mariadbd) return { server: mariadbd, client: (await which('mariadb')) ?? 'mariadb', installDb: await which('mariadb-install-db'), flavour: 'mariadb', source: 'system' }
@@ -47,11 +57,11 @@ function dataDir(ctx: AppContext): string {
 
 export const mariadbService: ServiceDefinition = {
   id: 'mariadb',
-  name: 'MariaDB',
-  description: 'Database server on 127.0.0.1 with a generated root password',
+  name: 'MySQL',
+  description: 'MySQL-compatible database (MariaDB by default, like XAMPP) on 127.0.0.1 with a generated root password',
   startTimeoutMs: 60_000,
-  async resolve(): Promise<Resolved | null> {
-    const found = await findDatabase()
+  async resolve(ctx: AppContext): Promise<Resolved | null> {
+    const found = await findDatabase(ctx.state.settings.db.engine)
     if (!found) return null
     let version: string | null = null
     try {
@@ -60,16 +70,18 @@ export const mariadbService: ServiceDefinition = {
     } catch {
       version = null
     }
-    return { command: found.server, version, source: `${found.flavour} (${found.source})` }
+    const label = found.flavour === 'mariadb' ? 'MariaDB' : 'MySQL'
+    return { command: found.server, version: version ? `${label} ${version}` : label, source: found.source }
   },
-  async install(_ctx, progress): Promise<void> {
+  async install(ctx, progress): Promise<void> {
     const brew = await which('brew')
     if (!brew) throw new Error('No MariaDB/MySQL found and Homebrew is not available to install one')
-    progress('Installing MariaDB with Homebrew (this can take several minutes)')
-    await execFileAsync(brew, ['install', 'mariadb'], { maxBuffer: 64 * 1024 * 1024 })
+    const formula = ctx.state.settings.db.engine === 'mysql' ? 'mysql' : 'mariadb'
+    progress(`Installing ${formula} with Homebrew (this can take several minutes)`)
+    await execFileAsync(brew, ['install', formula], { maxBuffer: 64 * 1024 * 1024 })
   },
   async prepare(ctx: AppContext, resolved: Resolved): Promise<Launch> {
-    const found = await findDatabase()
+    const found = await findDatabase(ctx.state.settings.db.engine)
     if (!found) throw new Error('database server disappeared')
     const datadir = dataDir(ctx)
     const tmpdir = join(ctx.paths.data, 'mariadb-tmp')
@@ -104,7 +116,7 @@ export const mariadbService: ServiceDefinition = {
   async afterStart(ctx: AppContext): Promise<void> {
     const marker = join(dataDir(ctx), '.zampp-password-set')
     if (await exists(marker)) return
-    const found = await findDatabase()
+    const found = await findDatabase(ctx.state.settings.db.engine)
     if (!found) return
     const password = ctx.secrets.dbRootPassword
     const base = [`--defaults-file=${myCnfPath(ctx)}`, '-u', 'root', `--socket=${dbSocket(ctx)}`]

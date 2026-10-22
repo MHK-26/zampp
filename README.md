@@ -5,7 +5,7 @@
 <h1 align="center">zampp</h1>
 
 <p align="center"><strong>The vibecoded, open-source XAMPP.</strong><br>
-Apache + PHP-FPM + MariaDB + Mailpit + Adminer, secure by default, with a real control panel and a CLI.<br>
+Apache + PHP-FPM + MySQL/MariaDB + phpMyAdmin + Mailpit, secure by default, with a real control panel and a CLI.<br>
 One command to install, one command to start, <code>myapp.test</code> sites in one click.</p>
 
 <p align="center">
@@ -49,7 +49,7 @@ and fixed the things everybody complains about.
 | | XAMPP | zampp |
 |---|---|---|
 | Database root password | none, reachable from the network | generated on first start, loopback only |
-| phpMyAdmin / DB UI | auto-login as root, cookie secret `xampp` | Adminer, prefilled server + user, password from the panel |
+| phpMyAdmin | auto-login as root with no password, cookie secret `xampp` | phpMyAdmin auto-login too, but root has a generated password, MySQL is loopback-only, secret is random; Adminer as a lighter alternative |
 | Port 80 already in use | "Problem detected!" and a netstat window | tells you which process has it, falls back to 8080/8443 automatically |
 | PHP versions | one, replace the whole stack to upgrade | any number side by side, per site, 15 MB static builds, no Homebrew needed |
 | Virtual hosts | edit `httpd-vhosts.conf` by hand | `zampp site add blog ~/code/blog` → `http://blog.test/` |
@@ -84,8 +84,9 @@ that folder and it is gone. Set `ZAMPP_HOME` to put it somewhere else.
 |---|---|---|---|
 | Apache httpd | 2.4 | macOS (or Homebrew) | 80 → 8080 when 80 needs admin rights |
 | PHP-FPM | 8.1 … 8.5, several at once | Homebrew installs are detected; otherwise [static-php-cli](https://static-php.dev) builds | unix sockets |
-| MariaDB | 11 / 13 | Homebrew (installed for you) | 3306, 127.0.0.1 only |
+| MySQL (MariaDB by default, like XAMPP; Oracle MySQL selectable) | 11 / 13 | Homebrew (installed for you) | 3306, 127.0.0.1 only |
 | Mailpit | latest | GitHub release | SMTP 1025, UI 8025 |
+| phpMyAdmin | latest | phpmyadmin.net | `http://localhost:8080/phpmyadmin/` |
 | Adminer | latest | GitHub release | `http://localhost:8080/adminer/` |
 | mkcert | latest | GitHub release, on first HTTPS site | — |
 | Control panel | — | this repo | 1980, token protected |

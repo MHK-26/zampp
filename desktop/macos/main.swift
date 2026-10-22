@@ -19,7 +19,7 @@ struct Service: Decodable {
     let logs: [NamedFile]
     let configs: [NamedFile]
 }
-struct Urls: Decodable { let web: String; let adminer: String; let mail: String }
+struct Urls: Decodable { let web: String; let adminer: String; let phpmyadmin: String?; let mail: String }
 struct Panel: Decodable { let port: Int }
 struct Settings: Decodable { let panel: Panel }
 struct Status: Decodable { let version: String; let home: String; let services: [Service]; let urls: Urls; let settings: Settings }
@@ -453,7 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let st = lastStatus else { return }
         let url: String
         if s.id == "apache" { url = st.urls.web }
-        else if s.id == "mariadb" { url = st.urls.adminer }
+        else if s.id == "mariadb" { url = st.urls.phpmyadmin ?? st.urls.adminer }
         else if s.id == "mailpit" { url = st.urls.mail }
         else if s.id.hasPrefix("php-fpm") { url = st.urls.web + "phpinfo.php" }
         else { url = st.urls.web }

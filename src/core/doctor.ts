@@ -86,6 +86,6 @@ export async function runDoctor(ctx: AppContext, sup: Supervisor): Promise<Check
   }
 
   const brew = await which('brew')
-  checks.push({ id: 'brew', title: 'Homebrew', level: brew ? 'ok' : 'warn', detail: brew ?? 'not found (needed only to install MariaDB)' })
+  checks.push({ id: 'brew', title: 'Homebrew', level: brew ? 'ok' : 'warn', detail: brew ?? 'not found (needed only to install MySQL/MariaDB)' })
   return checks
 }

@@ -29,6 +29,7 @@ export function registerRoutes(router: Router, ctx: AppContext, sup: Supervisor)
     urls: {
       web: `http://localhost${ctx.state.settings.web.httpPort === 80 ? '' : `:${ctx.state.settings.web.httpPort}`}/`,
       adminer: `http://localhost${ctx.state.settings.web.httpPort === 80 ? '' : `:${ctx.state.settings.web.httpPort}`}/adminer/`,
+      phpmyadmin: `http://localhost${ctx.state.settings.web.httpPort === 80 ? '' : `:${ctx.state.settings.web.httpPort}`}/phpmyadmin/`,
       mail: `http://127.0.0.1:${ctx.state.settings.mail.httpPort}/`,
     },
   }))
@@ -150,7 +151,7 @@ export function registerRoutes(router: Router, ctx: AppContext, sup: Supervisor)
     const after = await ctx.update((s) => ({ ...s, settings: settingsSchema.parse({ ...s.settings, ...patch }) }))
     const restart: string[] = []
     if (JSON.stringify(before.web) !== JSON.stringify(after.settings.web) || before.tld !== after.settings.tld) restart.push('apache')
-    if (before.db.port !== after.settings.db.port) restart.push('mariadb')
+    if (before.db.port !== after.settings.db.port || before.db.engine !== after.settings.db.engine) restart.push('mariadb')
     if (JSON.stringify(before.mail) !== JSON.stringify(after.settings.mail)) restart.push('mailpit', 'php-fpm')
     return { settings: after.settings, restartRequired: restart }
   })

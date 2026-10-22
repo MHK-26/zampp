@@ -42,7 +42,7 @@ export interface Status {
   settings: Settings
   services: ServiceStatus[]
   sites: Site[]
-  urls: { web: string; adminer: string; mail: string }
+  urls: { web: string; adminer: string; phpmyadmin: string; mail: string }
 }
 export interface InstalledPhp {
   version: string
