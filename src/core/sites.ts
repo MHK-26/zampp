@@ -118,10 +118,13 @@ export async function addSite(ctx: AppContext, input: SiteInput): Promise<Site> 
   return site
 }
 
-export async function updateSite(ctx: AppContext, name: string, patch: Partial<SiteInput>): Promise<Site> {
+export type SitePatch = { [K in keyof SiteInput]?: SiteInput[K] | undefined }
+
+export async function updateSite(ctx: AppContext, name: string, patch: SitePatch): Promise<Site> {
   const current = ctx.state.sites.find((s) => s.name === name)
   if (!current) throw new ServiceError('not_found', `Site "${name}" does not exist`)
-  const merged: SiteInput = { ...current, ...patch, name }
+  const defined = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<SiteInput>
+  const merged: SiteInput = { ...current, ...defined, name }
   return addSite(ctx, merged)
 }
 

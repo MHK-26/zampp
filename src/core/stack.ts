@@ -1,0 +1,58 @@
+import type { AppContext } from './context.ts'
+import type { Supervisor } from './supervisor.ts'
+import { ensurePhp, requiredPhpVersions } from './php.ts'
+import { ensureAdminer } from './www.ts'
+import { PHP_FPM_PREFIX } from './services/index.ts'
+import type { ProgressFn } from './provision.ts'
+import type { ServiceStatus } from './services/types.ts'
+
+export interface StackResult {
+  readonly started: ServiceStatus[]
+  readonly failed: { id: string; error: string }[]
+}
+
+/** Download/detect everything the default stack needs. Idempotent and safe to call often. */
+export async function ensureProvisioned(ctx: AppContext, sup: Supervisor, progress: ProgressFn = () => {}): Promise<void> {
+  await ensurePhp(ctx, progress)
+  await ensureAdminer(ctx, progress)
+  for (const id of ['mailpit', 'mariadb', 'apache']) {
+    const service = sup.find(id)
+    if ((await service.resolve(ctx)) === null) await sup.install(id, progress)
+  }
+}
+
+/** Service ids the autostart list expands to right now. */
+export function autostartIds(ctx: AppContext): string[] {
+  const ids: string[] = []
+  for (const entry of ctx.state.settings.autostart) {
+    if (entry === 'php-fpm') ids.push(...requiredPhpVersions(ctx).map((v) => `${PHP_FPM_PREFIX}${v}`))
+    else ids.push(entry)
+  }
+  return [...new Set(ids)]
+}
+
+export async function startAll(ctx: AppContext, sup: Supervisor, progress: ProgressFn = () => {}): Promise<StackResult> {
+  await ensureProvisioned(ctx, sup, progress)
+  const ids = autostartIds(ctx)
+  // PHP-FPM first so Apache's FastCGI sockets exist; the rest in parallel.
+  const php = ids.filter((id) => id.startsWith(PHP_FPM_PREFIX))
+  const rest = ids.filter((id) => !id.startsWith(PHP_FPM_PREFIX))
+  const started: ServiceStatus[] = []
+  const failed: { id: string; error: string }[] = []
+  const run = async (id: string) => {
+    try {
+      progress(`Starting ${id}`)
+      started.push(await sup.start(id))
+    } catch (error: unknown) {
+      failed.push({ id, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  for (const id of php) await run(id)
+  await Promise.all(rest.map(run))
+  return { started, failed }
+}
+
+export async function stopAll(sup: Supervisor): Promise<ServiceStatus[]> {
+  const statuses = await sup.statuses()
+  return Promise.all(statuses.filter((s) => s.running).map((s) => sup.stop(s.id)))
+}
