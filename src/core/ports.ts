@@ -41,7 +41,7 @@ export function parseLsof(output: string): Listener[] {
   for (const line of output.split('\n').slice(1)) {
     const cols = line.trim().split(/\s+/)
     if (cols.length < 9) continue
-    const name = cols[cols.length - 2] === '(LISTEN)' ? cols[cols.length - 3] : cols[cols.length - 1]
+    const name = cols[cols.length - 1] === '(LISTEN)' ? cols[cols.length - 2] : cols[cols.length - 1]
     if (!name) continue
     const sep = name.lastIndexOf(':')
     if (sep === -1) continue
