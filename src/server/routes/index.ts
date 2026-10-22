@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import type { AppContext } from '../../core/context.ts'
 import type { Supervisor } from '../../core/supervisor.ts'
 import { HttpError, readJson, type Router } from '../http.ts'
-import { startAll, stopAll } from '../../core/stack.ts'
+import { startAll, stopAll, ensureWebPorts } from '../../core/stack.ts'
 import { addSite, updateSite, removeSite, syncHosts, siteUrl, siteHost } from '../../core/sites.ts'
 import { siteSchema, settingsSchema } from '../../core/state.ts'
 import { detectHomebrewPhp, installStaticPhp, listStaticPhpVersions, defaultPhp } from '../../core/php.ts'
@@ -62,7 +62,10 @@ export function registerRoutes(router: Router, ctx: AppContext, sup: Supervisor)
 
   router.add('GET', '/api/v1/services', () => sup.statuses())
   router.add('GET', '/api/v1/services/:id', (_req, _res, p) => sup.status(p.id ?? ''))
-  router.add('POST', '/api/v1/services/:id/start', (_req, _res, p) => sup.start(p.id ?? ''))
+  router.add('POST', '/api/v1/services/:id/start', async (_req, _res, p) => {
+    if (p.id === 'apache') await ensureWebPorts(ctx, sup, (m) => ctx.log(m))
+    return sup.start(p.id ?? '')
+  })
   router.add('POST', '/api/v1/services/:id/stop', (_req, _res, p) => sup.stop(p.id ?? ''))
   router.add('POST', '/api/v1/services/:id/restart', (_req, _res, p) => sup.restart(p.id ?? ''))
   router.add('POST', '/api/v1/services/:id/install', async (_req, _res, p) => {

@@ -12,15 +12,22 @@ export interface Listener {
   readonly port: number
 }
 
-export function isPortFree(port: number, host = '127.0.0.1'): Promise<boolean> {
+export type PortProbe = 'free' | 'busy' | 'denied'
+
+/** Try to bind. `denied` means the OS refuses (ports below 1024 without privileges). */
+export function probePort(port: number, host = '127.0.0.1'): Promise<PortProbe> {
   return new Promise((resolvePromise) => {
     const server = createServer()
     server.unref()
-    server.once('error', () => resolvePromise(false))
+    server.once('error', (error: NodeJS.ErrnoException) => resolvePromise(error.code === 'EACCES' || error.code === 'EPERM' ? 'denied' : 'busy'))
     server.listen({ port, host, exclusive: true }, () => {
-      server.close(() => resolvePromise(true))
+      server.close(() => resolvePromise('free'))
     })
   })
+}
+
+export async function isPortFree(port: number, host = '127.0.0.1'): Promise<boolean> {
+  return (await probePort(port, host)) === 'free'
 }
 
 /** First free port from the candidates, then scan upwards from the last one. */

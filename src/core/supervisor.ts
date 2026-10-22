@@ -4,7 +4,7 @@ import { connect } from 'node:net'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import type { AppContext } from './context.ts'
-import { whoListens, isPortFree } from './ports.ts'
+import { whoListens, probePort } from './ports.ts'
 import { ServiceError, type ServiceDefinition, type ServiceStatus, type ProgressFn } from './services/types.ts'
 
 export interface SupervisorEvents {
@@ -136,7 +136,11 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     }
 
     for (const port of service.ports(this.#ctx)) {
-      if (!(await isPortFree(port))) {
+      const probe = await probePort(port)
+      if (probe === 'denied') {
+        throw new ServiceError('port_denied', `Port ${port} needed by ${service.name} requires administrator rights on this system. Pick a port above 1024 in Settings.`)
+      }
+      if (probe === 'busy') {
         const owners = await whoListens(port)
         const who = owners.map((o) => `${o.command} (pid ${o.pid})`).join(', ') || 'another process'
         throw new ServiceError('port_in_use', `Port ${port} needed by ${service.name} is in use by ${who}`)

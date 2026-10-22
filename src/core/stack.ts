@@ -5,6 +5,7 @@ import { ensureAdminer } from './www.ts'
 import { PHP_FPM_PREFIX } from './services/index.ts'
 import type { ProgressFn } from './provision.ts'
 import type { ServiceStatus } from './services/types.ts'
+import { probePort, findFreePort } from './ports.ts'
 
 export interface StackResult {
   readonly started: ServiceStatus[]
@@ -31,8 +32,31 @@ export function autostartIds(ctx: AppContext): string[] {
   return [...new Set(ids)]
 }
 
+export const FALLBACK_HTTP_PORTS = [8080, 8000, 8888, 8081]
+export const FALLBACK_HTTPS_PORTS = [8443, 8444, 9443]
+
+/**
+ * Ports 80/443 are the XAMPP defaults, but many systems refuse them without root.
+ * When the OS denies the bind, switch to the first free high port and remember it.
+ */
+export async function ensureWebPorts(ctx: AppContext, sup: Supervisor, progress: ProgressFn = () => {}): Promise<{ httpPort: number; httpsPort: number; changed: boolean }> {
+  const { httpPort, httpsPort } = ctx.state.settings.web
+  if ((await sup.status('apache')).running) return { httpPort, httpsPort, changed: false }
+  let nextHttp = httpPort
+  let nextHttps = httpsPort
+  if ((await probePort(httpPort)) === 'denied') nextHttp = await findFreePort(FALLBACK_HTTP_PORTS)
+  if ((await probePort(httpsPort)) === 'denied') nextHttps = await findFreePort(FALLBACK_HTTPS_PORTS)
+  const changed = nextHttp !== httpPort || nextHttps !== httpsPort
+  if (changed) {
+    progress(`Ports ${httpPort}/${httpsPort} need administrator rights here; using ${nextHttp}/${nextHttps} instead (change in Settings)`)
+    await ctx.update((s) => ({ ...s, settings: { ...s.settings, web: { ...s.settings.web, httpPort: nextHttp, httpsPort: nextHttps } } }))
+  }
+  return { httpPort: nextHttp, httpsPort: nextHttps, changed }
+}
+
 export async function startAll(ctx: AppContext, sup: Supervisor, progress: ProgressFn = () => {}): Promise<StackResult> {
   await ensureProvisioned(ctx, sup, progress)
+  await ensureWebPorts(ctx, sup, progress)
   const ids = autostartIds(ctx)
   // PHP-FPM first so Apache's FastCGI sockets exist; the rest in parallel.
   const php = ids.filter((id) => id.startsWith(PHP_FPM_PREFIX))

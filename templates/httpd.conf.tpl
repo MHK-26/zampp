@@ -51,10 +51,11 @@ DocumentRoot "{{www}}"
     Require all denied
 </FilesMatch>
 
-{{#if tls}}
+<IfModule ssl_module>
 SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1
 SSLCipherSuite HIGH:!aNULL:!MD5
 SSLSessionCache "shmcb:{{run}}/ssl_scache(512000)"
-{{/if}}
+SSLSessionCacheTimeout 300
+</IfModule>
 
 IncludeOptional "{{sitesEtc}}/*.conf"

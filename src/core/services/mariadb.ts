@@ -107,11 +107,43 @@ export const mariadbService: ServiceDefinition = {
     const found = await findDatabase()
     if (!found) return
     const password = ctx.secrets.dbRootPassword
-    // The password is base64url (A-Z a-z 0-9 _ -), so it is safe to inline.
-    const sql = `ALTER USER 'root'@'localhost' IDENTIFIED BY '${password}'; FLUSH PRIVILEGES;`
-    await execFileAsync(found.client, [`--defaults-file=${myCnfPath(ctx)}`, '-u', 'root', `--socket=${dbSocket(ctx)}`, '-e', sql])
+    const base = [`--defaults-file=${myCnfPath(ctx)}`, '-u', 'root', `--socket=${dbSocket(ctx)}`]
+    const query = async (sql: string, withPassword: boolean) => {
+      const env = withPassword ? { ...process.env, MYSQL_PWD: password } : { ...process.env }
+      const { stdout } = await execFileAsync(found.client, [...base, '-N', '-B', '-e', sql], { env })
+      return stdout
+    }
+    // Fresh installs have no password; a half-finished earlier run may already have one.
+    let withPassword = false
+    try {
+      await query('SELECT 1', false)
+    } catch {
+      withPassword = true
+    }
+    // The password is base64url (A-Z a-z 0-9 _ -), so inlining it is safe.
+    const redact = (text: string) => text.split(password).join('***')
+    try {
+      if (found.flavour === 'mariadb') {
+        // One UPDATE covers every root@<host> row regardless of hostname casing.
+        await query(
+          [
+            `UPDATE mysql.global_priv SET priv = JSON_SET(priv, '$.plugin', 'mysql_native_password', '$.authentication_string', PASSWORD('${password}')) WHERE user = 'root';`,
+            "DELETE FROM mysql.global_priv WHERE user = '';",
+            'FLUSH PRIVILEGES;',
+          ].join(' '),
+          withPassword,
+        )
+      } else {
+        const hosts = (await query("SELECT host FROM mysql.user WHERE user = 'root'", withPassword)).split('\n').map((h) => h.trim()).filter((h) => h !== '')
+        for (const h of hosts) await query(`ALTER USER 'root'@'${h.replace(/'/g, '')}' IDENTIFIED BY '${password}';`, withPassword)
+        await query("DROP USER IF EXISTS ''@'localhost'; FLUSH PRIVILEGES;", withPassword)
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Could not set the database root password: ${redact(message).split('\n').filter((l) => l.includes('ERROR')).join(' ') || 'unknown error'}`)
+    }
     await writeFile(marker, new Date().toISOString(), 'utf8')
-    ctx.log('Database root password set')
+    ctx.log('Database root password set for every root account')
   },
   logs(ctx: AppContext): readonly NamedFile[] {
     return [{ name: 'error', path: join(ctx.paths.logs, 'mariadb-error.log') }]

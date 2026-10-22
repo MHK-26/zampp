@@ -81,6 +81,8 @@ export interface HostsSyncResult {
 
 /** Bring /etc/hosts in line with the sites list. Needs an admin prompt only when something changed. */
 export async function syncHosts(ctx: AppContext): Promise<HostsSyncResult> {
+  // CI and tests set ZAMPP_SKIP_HOSTS=1 to avoid the administrator prompt.
+  if (process.env.ZAMPP_SKIP_HOSTS === '1') return { changed: false, written: false, error: 'skipped (ZAMPP_SKIP_HOSTS=1)' }
   let current: string
   try {
     current = await readHosts()
