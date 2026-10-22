@@ -62,17 +62,34 @@ and fixed the things everybody complains about.
 
 ## Install
 
-Requirements: **macOS 13+** (Apple Silicon or Intel) with **Node.js 24+**. Homebrew is only
-needed for MariaDB; Apache comes with macOS, PHP and everything else is downloaded for you.
+Requirements: **macOS 13+** (Apple Silicon or Intel) with **Node.js 24+**
+([nodejs.org](https://nodejs.org) or `brew install node`). Homebrew is only needed for
+MySQL/MariaDB; Apache comes with macOS, PHP and everything else is downloaded for you.
 Linux is designed-for but not yet tested.
 
+**One line** (installs to `~/.zampp/app`, puts `zampp` on your PATH, adds zampp.app to /Applications):
+
 ```bash
-git clone https://github.com/MHK-26/zampp.git
-cd zampp
-npm install && npm --prefix ui install && npm run build:ui
-npm link                 # puts `zampp` on your PATH
+curl -fsSL https://raw.githubusercontent.com/MHK-26/zampp/main/install.sh | sh
 zampp start              # provisions what is missing and starts the stack
 zampp gui                # native control panel (macOS); `zampp ui` for the web panel
+```
+
+Re-run the same line to update. Remove with `sh ~/.zampp/app/install.sh --uninstall`
+(add `--purge` to delete databases and site configs too).
+
+**macOS package**: download `zampp-<version>.pkg` from the
+[latest release](https://github.com/MHK-26/zampp/releases/latest) and double-click it. It is
+not notarised yet, so macOS will ask you to confirm in System Settings → Privacy & Security
+the first time. It installs to `/usr/local/zampp`, `/usr/local/bin/zampp` and
+`/Applications/zampp.app`.
+
+**From source** (for hacking on zampp):
+
+```bash
+git clone https://github.com/MHK-26/zampp.git && cd zampp
+npm install && npm --prefix ui install && npm run build:ui
+npm link                 # puts `zampp` on your PATH
 ```
 
 Everything zampp creates lives in `~/.zampp` (binaries, configs, data, logs, secrets). Delete
@@ -194,7 +211,7 @@ zampp works end to end on macOS today: this README's output is real. It is young
 - [ ] dnsmasq provider for wildcard `*.test` without hosts-file prompts
 - [ ] Linux and Windows (WSL first) support
 - [ ] Menu-bar mode for the desktop panel; share links via a tunnel
-- [ ] npm publish so `npx zampp start` works
+- [ ] npm publish so `npx zampp start` works; signed and notarised .pkg
 
 ## Vibecoded
 

@@ -6,3 +6,4 @@ ui/dist/
 .env
 *.tgz
 desktop/macos/build/
+dist/

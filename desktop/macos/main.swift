@@ -81,7 +81,7 @@ final class API {
 
 func findCli() -> String? {
     let env = ProcessInfo.processInfo.environment
-    let candidates = [env["ZAMPP_CLI"] ?? "", "/opt/homebrew/bin/zampp", "/usr/local/bin/zampp", NSHomeDirectory() + "/.npm-global/bin/zampp"]
+    let candidates = [env["ZAMPP_CLI"] ?? "", "/opt/homebrew/bin/zampp", "/usr/local/bin/zampp", NSHomeDirectory() + "/.local/bin/zampp", NSHomeDirectory() + "/.npm-global/bin/zampp"]
     return candidates.first { !$0.isEmpty && FileManager.default.isExecutableFile(atPath: $0) }
 }
 

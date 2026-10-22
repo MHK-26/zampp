@@ -35,3 +35,9 @@ its config from a template; never edit files in place.
 
 Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, `refactor:`), one logical
 change per commit, tests included. Run `npm test && npm run typecheck` before pushing.
+
+## Installers
+
+- `install.sh` — the `curl | sh` installer. Test it against your working tree without touching
+  your real install: `ZAMPP_HOME=/tmp/zh ZAMPP_REPO="file://$PWD" sh install.sh`.
+- `scripts/make-pkg.sh` — builds `dist/zampp-<version>.pkg` (unsigned) with `pkgbuild`.
