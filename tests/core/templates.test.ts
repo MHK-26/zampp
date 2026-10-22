@@ -29,3 +29,11 @@ test('each over scalars with {{.}}', () => {
 test('nested dotted lookups', () => {
   assert.equal(render('{{web.httpPort}}', { web: { httpPort: 8080 } }), '8080')
 })
+
+test('nested sections of the same kind close correctly', () => {
+  const tpl = '{{#if tls}}[{{#if aliases}}A{{/if}}T]{{/if}}{{#if aliases}}X{{/if}}'
+  assert.equal(render(tpl, { tls: true, aliases: 'a' }), '[AT]X')
+  assert.equal(render(tpl, { tls: false, aliases: 'a' }), 'X')
+  assert.equal(render(tpl, { tls: true, aliases: '' }), '[T]')
+  assert.throws(() => render('{{#if x}}oops', { x: true }), TemplateError)
+})

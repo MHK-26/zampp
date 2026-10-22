@@ -9,7 +9,33 @@ export type TemplateVars = Record<string, TemplateValue>
 
 export class TemplateError extends Error {}
 
-const SECTION = /\{\{#(if|unless|each)\s+([\w.]+)\}\}([\s\S]*?)\{\{\/\1\}\}/
+const OPEN = /\{\{#(if|unless|each)\s+([\w.]+)\}\}/g
+
+interface Section {
+  readonly start: number
+  readonly end: number
+  readonly kind: string
+  readonly key: string
+  readonly body: string
+}
+
+/** Locate the first section and its matching close tag, honouring nesting of the same kind. */
+function findSection(text: string): Section | null {
+  OPEN.lastIndex = 0
+  const open = OPEN.exec(text)
+  if (!open) return null
+  const kind = open[1] as string
+  const key = open[2] as string
+  const bodyStart = open.index + open[0].length
+  const tags = new RegExp(`\\{\\{(#${kind}\\s+[\\w.]+|\\/${kind})\\}\\}`, 'g')
+  tags.lastIndex = bodyStart
+  let depth = 1
+  for (let tag = tags.exec(text); tag !== null; tag = tags.exec(text)) {
+    depth += (tag[1] as string).startsWith('#') ? 1 : -1
+    if (depth === 0) return { start: open.index, end: tag.index + tag[0].length, kind, key, body: text.slice(bodyStart, tag.index) }
+  }
+  throw new TemplateError(`Unclosed {{#${kind} ${key}}} section`)
+}
 
 function lookup(vars: TemplateVars, path: string): TemplateValue {
   if (path === '.') return vars['.']
@@ -30,8 +56,8 @@ function truthy(value: TemplateValue): boolean {
 
 export function render(template: string, vars: TemplateVars): string {
   let out = template
-  for (let match = SECTION.exec(out); match !== null; match = SECTION.exec(out)) {
-    const [whole, kind, key, body] = match as unknown as [string, string, string, string]
+  for (let section = findSection(out); section !== null; section = findSection(out)) {
+    const { kind, key, body } = section
     const value = lookup(vars, key)
     let replacement = ''
     if (kind === 'if' && truthy(value)) replacement = render(body, vars)
@@ -45,7 +71,7 @@ export function render(template: string, vars: TemplateVars): string {
         })
         .join('')
     }
-    out = out.slice(0, match.index) + replacement + out.slice(match.index + whole.length)
+    out = out.slice(0, section.start) + replacement + out.slice(section.end)
   }
   return out.replace(/\{\{([\w.]+)\}\}/g, (_, key: string) => {
     const value = lookup(vars, key)
