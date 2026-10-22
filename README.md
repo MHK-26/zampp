@@ -72,7 +72,7 @@ cd zampp
 npm install && npm --prefix ui install && npm run build:ui
 npm link                 # puts `zampp` on your PATH
 zampp start              # provisions what is missing and starts the stack
-zampp ui                 # opens the control panel
+zampp gui                # native control panel (macOS); `zampp ui` for the web panel
 ```
 
 Everything zampp creates lives in `~/.zampp` (binaries, configs, data, logs, secrets). Delete
@@ -92,7 +92,15 @@ that folder and it is gone. Set `ZAMPP_HOME` to put it somewhere else.
 
 ## The control panel
 
-`zampp ui` opens a web panel on `127.0.0.1:1980`.
+Two flavours, same API.
+
+**Desktop (macOS)** — `zampp gui` opens a small native window, the XAMPP manager you remember:
+one row per service with a green/red light, version, ports, PID and Start / Stop / Restart /
+Logs buttons, plus Start All, Stop All, Localhost, Database, Mail, Doctor and an activity log.
+It is ~600 lines of AppKit in [`desktop/macos/main.swift`](desktop/macos/main.swift), compiled
+on first run with the system Swift toolchain (Xcode command line tools). No Electron.
+
+**Web** — `zampp ui` opens the full panel on `127.0.0.1:1980`.
 
 - **Dashboard** — every service with start/stop/restart, doctor problems, quick links.
 - **Services** — versions, PIDs, uptime, ports, and the generated config files in an editor.
@@ -109,7 +117,8 @@ that folder and it is gone. Set `ZAMPP_HOME` to put it somewhere else.
 
 ```
 zampp start | stop | restart | status | doctor
-zampp ui | serve                     control panel (or API only)
+zampp gui                            native desktop panel (macOS)
+zampp ui | serve                     web panel (or API only)
 
 zampp site add <name> [path] [--php 8.3] [--tls] [--alias www.name.test]
 zampp site rm <name>
@@ -183,7 +192,7 @@ zampp works end to end on macOS today: this README's output is real. It is young
 - [ ] Project templates: WordPress, Laravel, plain PHP, Composer bundled
 - [ ] dnsmasq provider for wildcard `*.test` without hosts-file prompts
 - [ ] Linux and Windows (WSL first) support
-- [ ] Menu-bar app wrapping the panel; share links via a tunnel
+- [ ] Menu-bar mode for the desktop panel; share links via a tunnel
 - [ ] npm publish so `npx zampp start` works
 
 ## Vibecoded

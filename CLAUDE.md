@@ -7,7 +7,8 @@ zampp is an open-source, better XAMPP: a local web development stack manager
 ## Stack
 - Node.js 26 (type-stripped TypeScript, run `.ts` directly; erasable syntax only:
   no `enum`, no parameter properties, no namespaces).
-- Backend: `node:http` + `ws`; UI: Vite + React + TypeScript (in `ui/`).
+- Backend: `node:http` + `ws`; web UI: Vite + React + TypeScript (in `ui/`);
+  native macOS panel: single-file AppKit app in `desktop/macos/` built by `desktop/macos/build.sh`.
 - Tests: `node --test` (`npm test`). Type check: `npm run typecheck`.
 - State and runtime live outside the repo in `~/.zampp` (override with `ZAMPP_HOME`).
 

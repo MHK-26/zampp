@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { existsSync, openSync } from 'node:fs'
+import { join } from 'node:path'
+import { PROJECT_ROOT } from '../src/core/context.ts'
+import { tcpReachable } from '../src/core/supervisor.ts'
 import { AppContext } from '../src/core/context.ts'
 import { Supervisor } from '../src/core/supervisor.ts'
 import { allServices } from '../src/core/services/index.ts'
@@ -18,7 +22,8 @@ Usage: zampp <command> [options]
   stop                  Stop every running service
   restart               Stop, then start
   status                Show services, ports and sites
-  ui [--no-open]        Run the control panel API and open it in the browser
+  gui                   Open the native desktop control panel (macOS)
+  ui [--no-open]        Run the web control panel API and open it in the browser
   serve                 Run the API only (foreground)
   doctor                Check the environment and explain how to fix problems
 
@@ -132,6 +137,29 @@ async function main(argv: string[]): Promise<number> {
         console.log(`\n${color.bold('Sites')}`)
         for (const site of ctx.state.sites) console.log(`  ${siteUrl(ctx, site).padEnd(32)} ${site.root}  ${color.dim(`php ${site.php ?? defaultPhp(ctx)?.version ?? '-'}`)}`)
       }
+      return 0
+    }
+    case 'gui':
+    case 'panel': {
+      if (process.platform !== 'darwin') {
+        console.log('The native panel is macOS-only for now. Use `zampp ui` for the web panel.')
+        return 1
+      }
+      const app = join(PROJECT_ROOT, 'desktop', 'macos', 'build', 'zampp.app')
+      if (!existsSync(app)) {
+        console.log(color.dim('  … building the desktop panel (first run, needs Xcode command line tools)'))
+        await new Promise<void>((resolve, reject) => {
+          execFile('sh', [join(PROJECT_ROOT, 'desktop', 'macos', 'build.sh')], (error, _stdout, stderr) => (error ? reject(new Error(stderr || error.message)) : resolve()))
+        })
+      }
+      if (!(await tcpReachable(ctx.state.settings.panel.port))) {
+        const out = openSync(join(ctx.paths.logs, 'panel.out.log'), 'a')
+        const child = spawn(process.execPath, [join(PROJECT_ROOT, 'bin', 'zampp.ts'), 'serve'], { detached: true, stdio: ['ignore', out, out] })
+        child.unref()
+        console.log(color.dim(`  … API started in the background (pid ${child.pid})`))
+      }
+      execFile('open', [app], () => {})
+      console.log(`${color.green('✔')} zampp Control Panel opened`)
       return 0
     }
     case 'serve':

@@ -15,7 +15,7 @@ honest evaluation of the process and the tools. No questions allowed mid-flight.
 | Daemon | ~2,400 lines of TypeScript run directly by Node (no build): supervisor, 4 service definitions (Apache, PHP-FPM per version, MariaDB, Mailpit), provisioning (static-php-cli, GitHub releases, Homebrew), sites/vhosts, hosts-file management, mkcert TLS, doctor. |
 | API | 30 routes under `/api/v1` plus a WebSocket log tail; bearer-token auth; error envelope per the ECC api-design skill. |
 | CLI | `zampp start/stop/restart/status/ui/serve/doctor/site/hosts/php/db/mail/open`. |
-| Control panel | React + Vite, 10 pages, dark/light, 79 kB gzipped. |
+| Control panel | React + Vite, 10 pages, dark/light, 79 kB gzipped; plus a native macOS AppKit window (`zampp gui`) added after the owner tried the web panel and asked for "a simple one, not web, like XAMPP". |
 | Tests | 35 tests (`node --test`), 0 type errors, UI builds; line coverage 66% (`src/**`). |
 | Verified live | PHP 8.5.11 (Homebrew) and 8.4.23 (static) serving two sites side by side through Apache with `.htaccess` rewrites; MariaDB with the generated password enforced over TCP and no-password login refused; `mail()` landing in Mailpit; Adminer prefilled; API, doctor, ports, WebSocket tail. |
 | Commits | 16, conventional, one step each. |
