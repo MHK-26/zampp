@@ -70,3 +70,11 @@ test('resolvePaths honours ZAMPP_HOME', () => {
   assert.equal(p.stateFile, '/tmp/zh/state.json')
   assert.equal(p.sitesEtc, '/tmp/zh/etc/sites')
 })
+
+test('site inputs that could break out of Apache config are rejected', () => {
+  assert.throws(() => siteSchema.parse({ name: 'x', root: '/tmp/a"\nRequire all granted' }))
+  assert.throws(() => siteSchema.parse({ name: 'x', root: '/tmp/a', aliases: ['bad alias'] }))
+  assert.throws(() => siteSchema.parse({ name: 'x', root: '/tmp/a', aliases: ['evil.test\nServerAlias *'] }))
+  assert.throws(() => siteSchema.parse({ name: 'x', root: '/tmp/a', php: '8.4; rm -rf /' }))
+  assert.ok(siteSchema.parse({ name: 'x', root: '/tmp/My Site (2)', aliases: ['www.x.test', 'x.local'], php: '8.4' }))
+})

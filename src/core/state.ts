@@ -4,12 +4,16 @@ import { z } from 'zod'
 
 export const SITE_NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 
+export const HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+/** Paths end up inside quoted Apache directives; quotes and newlines would break out of them. */
+const SAFE_PATH = /^[^"\r\n\0]+$/
+
 export const siteSchema = z.object({
   name: z.string().regex(SITE_NAME, 'lowercase letters, digits and dashes only'),
-  root: z.string().min(1),
-  php: z.string().min(1).optional(),
+  root: z.string().min(1).regex(SAFE_PATH, 'path must not contain quotes or line breaks'),
+  php: z.string().regex(/^\d+(\.\d+){0,2}$/, 'PHP version like 8.4 or 8.4.27').optional(),
   tls: z.boolean().default(false),
-  aliases: z.array(z.string().min(1)).default([]),
+  aliases: z.array(z.string().regex(HOSTNAME, 'alias must be a hostname like www.myapp.test')).default([]),
   createdAt: z.string().default(() => new Date().toISOString()),
 })
 export type Site = z.infer<typeof siteSchema>
