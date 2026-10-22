@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { AppContext } from '../context.ts'
@@ -20,12 +20,18 @@ export const mailpitService: ServiceDefinition = {
   async resolve(ctx: AppContext): Promise<Resolved | null> {
     const bin = mailpitBinary(ctx)
     if (!(await exists(bin))) return null
+    // `mailpit version` phones home to check for updates, which can hang or fail offline,
+    // so the version recorded at install time is the source of truth.
     let version: string | null = null
     try {
-      const { stdout } = await execFileAsync(bin, ['version'])
-      version = /v?(\d+\.\d+\.\d+)/.exec(stdout)?.[1] ?? null
+      version = (await readFile(join(ctx.paths.bin, 'mailpit', 'VERSION'), 'utf8')).trim() || null
     } catch {
-      version = null
+      try {
+        const { stdout } = await execFileAsync(bin, ['version'], { timeout: 3000 })
+        version = /v?(\d+\.\d+\.\d+)/.exec(stdout)?.[1] ?? null
+      } catch {
+        version = null
+      }
     }
     return { command: bin, version, source: 'github release' }
   },
@@ -41,6 +47,7 @@ export const mailpitService: ServiceDefinition = {
     progress(`Extracting ${asset.name}`)
     await extractTar(archive, dir)
     await makeExecutable(mailpitBinary(ctx))
+    await writeFile(join(dir, 'VERSION'), `${asset.tag.replace(/^v/, '')}\n`, 'utf8')
     progress(`Mailpit ${asset.tag} ready`)
   },
   async prepare(ctx: AppContext, resolved: Resolved): Promise<Launch> {
