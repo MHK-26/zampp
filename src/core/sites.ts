@@ -105,11 +105,18 @@ echo '<h1>' . htmlspecialchars($_SERVER['HTTP_HOST'] ?? 'site') . ' works</h1>';
 echo '<p>PHP ' . PHP_VERSION . ' &middot; document root ' . htmlspecialchars(__DIR__) . '</p>';
 `
 
+/** "8.4" → newest installed 8.4.x; exact versions pass through. */
+export function resolveInstalledPhp(ctx: AppContext, requested: string): string {
+  const exact = ctx.state.php.find((p) => p.version === requested)
+  if (exact) return exact.version
+  const minor = ctx.state.php.find((p) => p.version.startsWith(`${requested}.`))
+  if (minor) return minor.version
+  throw new ServiceError('unknown_php', `PHP ${requested} is not installed (zampp php install ${requested})`)
+}
+
 export async function addSite(ctx: AppContext, input: SiteInput): Promise<Site> {
-  const site = siteSchema.parse({ ...input, root: resolve(input.root) })
-  if (site.php && !ctx.state.php.some((p) => p.version === site.php)) {
-    throw new ServiceError('unknown_php', `PHP ${site.php} is not installed`)
-  }
+  const php = input.php ? resolveInstalledPhp(ctx, input.php) : undefined
+  const site = siteSchema.parse({ ...input, ...(php ? { php } : {}), root: resolve(input.root) })
   if (!(await exists(site.root))) {
     await mkdir(site.root, { recursive: true })
     await writeFile(join(site.root, 'index.php'), STARTER_INDEX, 'utf8')

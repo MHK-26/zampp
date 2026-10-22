@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ensureDirs, resolvePaths, type Paths } from './paths.ts'
@@ -17,6 +17,7 @@ export class AppContext {
   readonly secrets: Secrets
   readonly log: LogFn
   #state: State
+  #stateMtime = 0
 
   private constructor(paths: Paths, state: State, secrets: Secrets, log: LogFn) {
     this.paths = paths
@@ -36,9 +37,29 @@ export class AppContext {
     return this.#state
   }
 
+  /** Pick up changes made by another process (e.g. the CLI while the panel runs). */
+  async reloadIfChanged(): Promise<void> {
+    let mtime = 0
+    try {
+      mtime = (await stat(this.paths.stateFile)).mtimeMs
+    } catch {
+      return
+    }
+    if (mtime !== this.#stateMtime) {
+      this.#state = await loadState(this.paths.stateFile)
+      this.#stateMtime = mtime
+    }
+  }
+
   async update(mutate: (state: State) => State): Promise<State> {
+    await this.reloadIfChanged()
     this.#state = mutate(this.#state)
     await saveState(this.paths.stateFile, this.#state)
+    try {
+      this.#stateMtime = (await stat(this.paths.stateFile)).mtimeMs
+    } catch {
+      this.#stateMtime = 0
+    }
     return this.#state
   }
 

@@ -6,6 +6,8 @@ import { PHP_FPM_PREFIX } from './services/index.ts'
 import type { ProgressFn } from './provision.ts'
 import type { ServiceStatus } from './services/types.ts'
 import { probePort, findFreePort } from './ports.ts'
+import { syncHosts, type HostsSyncResult } from './sites.ts'
+import { reloadApache } from './services/apache.ts'
 
 export interface StackResult {
   readonly started: ServiceStatus[]
@@ -79,4 +81,31 @@ export async function startAll(ctx: AppContext, sup: Supervisor, progress: Progr
 export async function stopAll(sup: Supervisor): Promise<ServiceStatus[]> {
   const statuses = await sup.statuses()
   return Promise.all(statuses.filter((s) => s.running).map((s) => sup.stop(s.id)))
+}
+
+/**
+ * After a site is added, changed or removed: sync /etc/hosts, start any PHP version a
+ * site now pins, re-render httpd.conf and gracefully restart Apache.
+ */
+export async function afterSiteChange(ctx: AppContext, sup: Supervisor): Promise<HostsSyncResult> {
+  const hosts = await syncHosts(ctx)
+  for (const site of ctx.state.sites) {
+    if (!site.php) continue
+    const id = `${PHP_FPM_PREFIX}${site.php}`
+    if (!(await sup.status(id)).running) {
+      try {
+        await sup.start(id)
+      } catch (error: unknown) {
+        ctx.log(`Could not start ${id}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+  const apache = await sup.status('apache')
+  if (apache.running) {
+    const service = sup.find('apache')
+    const resolved = await service.resolve(ctx)
+    if (resolved) await service.prepare(ctx, resolved)
+    await reloadApache(apache.pid)
+  }
+  return hosts
 }

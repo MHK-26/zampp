@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { AppContext } from '../src/core/context.ts'
 import { Supervisor } from '../src/core/supervisor.ts'
 import { allServices } from '../src/core/services/index.ts'
-import { startAll, stopAll, ensureProvisioned } from '../src/core/stack.ts'
+import { startAll, stopAll, ensureProvisioned, afterSiteChange } from '../src/core/stack.ts'
 import { addSite, removeSite, syncHosts, siteUrl, siteHost } from '../src/core/sites.ts'
 import { installStaticPhp, detectHomebrewPhp, defaultPhp, listStaticPhpVersions } from '../src/core/php.ts'
 import { runDoctor } from '../src/core/doctor.ts'
@@ -171,11 +171,9 @@ async function main(argv: string[]): Promise<number> {
           tls: flags.tls === true,
           aliases,
         })
-        const hosts = await syncHosts(ctx)
+        const hosts = await afterSiteChange(ctx, sup)
         if (hosts.error) console.log(color.yellow(`  ! hosts file not updated: ${hosts.error}`))
-        const apache = await sup.status('apache')
-        if (apache.running) await sup.restart('apache')
-        else console.log(color.dim('  Apache is not running; start the stack with `zampp start`.'))
+        if (!(await sup.status('apache')).running) console.log(color.dim('  Apache is not running; start the stack with `zampp start`.'))
         console.log(`${color.green('✔')} ${siteHost(site, ctx.state.settings.tld)} → ${site.root}\n  ${siteUrl(ctx, site)}`)
         return 0
       }
@@ -183,8 +181,7 @@ async function main(argv: string[]): Promise<number> {
         const name = rest[0]
         if (!name) throw new Error('Usage: zampp site rm <name>')
         await removeSite(ctx, name)
-        await syncHosts(ctx)
-        if ((await sup.status('apache')).running) await sup.restart('apache')
+        await afterSiteChange(ctx, sup)
         console.log(`${color.green('✔')} removed ${name}`)
         return 0
       }

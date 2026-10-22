@@ -53,13 +53,14 @@ export async function startServer(ctx: AppContext, options: { port?: number; uiD
     try {
       if (url.pathname.startsWith('/api/')) {
         if (url.pathname === '/api/v1/health') return sendJson(res, 200, { data: { ok: true } })
+        await ctx.reloadIfChanged()
         if (!tokenMatches(presentedToken(req, url), ctx.secrets.token)) {
           throw new HttpError(401, 'unauthorized', 'Missing or invalid token. Run `zampp ui` to open the panel with a valid token.')
         }
         const matched = router.match(req.method ?? 'GET', url.pathname)
         if (!matched) throw new HttpError(404, 'not_found', `No route for ${req.method} ${url.pathname}`)
         const result = await matched.handler(req, res, matched.params, url)
-        if (!res.headersSent) sendJson(res, result === undefined ? 204 : 200, result === undefined ? '' : { data: result })
+        if (!res.headersSent) sendJson(res, result === undefined ? 204 : res.statusCode !== 200 ? res.statusCode : 200, result === undefined ? '' : { data: result })
         return
       }
       await serveStatic(uiDir, url.pathname, res)
@@ -92,9 +93,11 @@ export async function startServer(ctx: AppContext, options: { port?: number; uiD
     server.once('error', reject)
     server.listen(port, '127.0.0.1', () => resolve())
   })
+  const address = server.address()
+  const boundPort = address && typeof address === 'object' ? address.port : port
   return {
-    port,
-    url: `http://127.0.0.1:${port}/`,
+    port: boundPort,
+    url: `http://127.0.0.1:${boundPort}/`,
     close: () =>
       new Promise<void>((resolve) => {
         wss.close()

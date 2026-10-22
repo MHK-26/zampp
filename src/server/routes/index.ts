@@ -3,44 +3,17 @@ import { readFile, writeFile } from 'node:fs/promises'
 import type { AppContext } from '../../core/context.ts'
 import type { Supervisor } from '../../core/supervisor.ts'
 import { HttpError, readJson, type Router } from '../http.ts'
-import { startAll, stopAll, ensureWebPorts } from '../../core/stack.ts'
+import { startAll, stopAll, ensureWebPorts, afterSiteChange } from '../../core/stack.ts'
 import { addSite, updateSite, removeSite, syncHosts, siteUrl, siteHost } from '../../core/sites.ts'
 import { siteSchema, settingsSchema } from '../../core/state.ts'
 import { detectHomebrewPhp, installStaticPhp, listStaticPhpVersions, defaultPhp } from '../../core/php.ts'
 import { listListeners } from '../../core/ports.ts'
 import { runDoctor } from '../../core/doctor.ts'
-import { reloadApache } from '../../core/services/apache.ts'
 import { PHP_FPM_PREFIX } from '../../core/services/index.ts'
 import { ensureSiteCertificate } from '../../core/tls.ts'
 import { PROJECT_ROOT } from '../../core/context.ts'
 
 const VERSION: string = JSON.parse(await readFile(`${PROJECT_ROOT}/package.json`, 'utf8')).version
-
-async function afterSiteChange(ctx: AppContext, sup: Supervisor) {
-  const hosts = await syncHosts(ctx)
-  // Any PHP version a site now needs must be running before Apache reloads.
-  for (const site of ctx.state.sites) {
-    if (site.php) {
-      const id = `${PHP_FPM_PREFIX}${site.php}`
-      if (!(await sup.status(id)).running) {
-        try {
-          await sup.start(id)
-        } catch {
-          /* reported through the services page */
-        }
-      }
-    }
-  }
-  const apache = await sup.status('apache')
-  if (apache.running) {
-    // Re-render httpd.conf (Listen 443 may have changed) and gracefully restart.
-    const service = sup.find('apache')
-    const resolved = await service.resolve(ctx)
-    if (resolved) await service.prepare(ctx, resolved)
-    await reloadApache(apache.pid)
-  }
-  return hosts
-}
 
 function siteView(ctx: AppContext) {
   return (site: (typeof ctx.state.sites)[number]) => ({ ...site, host: siteHost(site, ctx.state.settings.tld), url: siteUrl(ctx, site), phpEffective: site.php ?? defaultPhp(ctx)?.version ?? null })

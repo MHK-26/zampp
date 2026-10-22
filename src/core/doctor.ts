@@ -48,9 +48,11 @@ export async function runDoctor(ctx: AppContext, sup: Supervisor): Promise<Check
   ]
   const statuses = await sup.statuses()
   const ownPids = new Set(statuses.map((x) => x.pid).filter((p): p is number => p !== null))
+  const runningPorts = new Set(statuses.filter((x) => x.running).flatMap((x) => [...x.ports]))
   for (const [name, port] of wanted) {
     const owners = await whoListens(port)
-    const foreign = owners.filter((o) => !ownPids.has(o.pid) && o.pid !== process.pid)
+    // A running zampp service owns its port (Apache workers are children of the pid we know).
+    const foreign = runningPorts.has(port) ? [] : owners.filter((o) => !ownPids.has(o.pid) && o.pid !== process.pid)
     if (foreign.length === 0) {
       checks.push({ id: `port:${port}`, title: `Port ${port} (${name})`, level: 'ok', detail: owners.length > 0 ? 'in use by zampp' : 'free' })
     } else {
