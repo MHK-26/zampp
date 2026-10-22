@@ -27,13 +27,18 @@ export function applyManagedBlock(content: string, entries: readonly HostEntry[]
   const end = content.indexOf(BLOCK_END)
   const normalised = content.endsWith('\n') || content === '' ? content : `${content}\n`
   if (begin !== -1 && end !== -1 && end > begin) {
-    const before = normalised.slice(0, begin)
+    let before = normalised.slice(0, begin)
     const after = normalised.slice(end + BLOCK_END.length).replace(/^\n/, '')
-    const middle = block === '' ? '' : `${block}\n`
-    return before + middle + after
+    if (block === '') {
+      // Drop the blank separator line we added when the block was inserted.
+      before = before.replace(/\n\n$/, '\n')
+      return before + after
+    }
+    return `${before}${block}\n${after}`
   }
   if (block === '') return normalised
-  return `${normalised}${normalised.endsWith('\n\n') || normalised === '' ? '' : '\n'}${block}\n`
+  const separator = normalised === '' || normalised.endsWith('\n\n') ? '' : '\n'
+  return `${normalised}${separator}${block}\n`
 }
 
 export function parseManagedBlock(content: string): HostEntry[] {
