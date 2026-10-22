@@ -33,7 +33,6 @@ DirectoryIndex index.php index.html index.htm
     Require all denied
 </Directory>
 
-# Default host: the zampp welcome page and tools at http://localhost:{{httpPort}}/
 DocumentRoot "{{www}}"
 <Directory "{{www}}">
     Options Indexes FollowSymLinks
@@ -50,6 +49,30 @@ DocumentRoot "{{www}}"
 <FilesMatch "^\.ht">
     Require all denied
 </FilesMatch>
+
+# Default host: the zampp welcome page and tools at http://localhost:{{httpPort}}/
+# It must be the FIRST VirtualHost so unknown Host headers land here, not on a site.
+<VirtualHost 127.0.0.1:{{httpPort}}>
+    ServerName localhost
+    ServerAlias 127.0.0.1 ::1 *.localhost
+    DocumentRoot "{{www}}"
+    ErrorLog "{{logs}}/apache-error.log"
+    CustomLog "{{logs}}/apache-access.log" combined
+</VirtualHost>
+{{#if tls}}
+<VirtualHost 127.0.0.1:{{httpsPort}}>
+    ServerName localhost
+    ServerAlias 127.0.0.1 ::1 *.localhost
+    DocumentRoot "{{www}}"
+    {{#if localhostCert}}
+    SSLEngine on
+    SSLCertificateFile "{{localhostCert}}"
+    SSLCertificateKeyFile "{{localhostKey}}"
+    {{/if}}
+    ErrorLog "{{logs}}/apache-error.log"
+    CustomLog "{{logs}}/apache-access.log" combined
+</VirtualHost>
+{{/if}}
 
 <IfModule ssl_module>
 SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1

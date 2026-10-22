@@ -1,8 +1,12 @@
-// zampp Control Panel — a small native macOS window, like XAMPP's manager, that drives the
-// local zampp API. Built with plain AppKit so it needs nothing but the system toolchain.
+// zampp Control Panel — native macOS window modelled on the XAMPP Control Panel:
+// a Module / PID(s) / Port(s) / Actions table, a column of tool buttons on the right and a
+// timestamped "[module] message" log underneath. Plain AppKit, talks to the local zampp API.
 import AppKit
 import Foundation
 
+// MARK: - API model
+
+struct NamedFile: Decodable { let name: String; let path: String }
 struct Service: Decodable {
     let id: String
     let name: String
@@ -12,29 +16,28 @@ struct Service: Decodable {
     let running: Bool
     let pid: Int?
     let ports: [Int]
+    let logs: [NamedFile]
+    let configs: [NamedFile]
 }
 struct Urls: Decodable { let web: String; let adminer: String; let mail: String }
 struct Panel: Decodable { let port: Int }
 struct Settings: Decodable { let panel: Panel }
-struct Status: Decodable {
-    let version: String
-    let home: String
-    let services: [Service]
-    let urls: Urls
-    let settings: Settings
-}
+struct Status: Decodable { let version: String; let home: String; let services: [Service]; let urls: Urls; let settings: Settings }
 struct Envelope<T: Decodable>: Decodable { let data: T }
 struct ApiErrorBody: Decodable { struct Inner: Decodable { let code: String; let message: String }; let error: Inner }
 struct Check: Decodable { let title: String; let level: String; let detail: String; let fix: String? }
+struct Listener: Decodable { let command: String; let pid: Int; let address: String; let port: Int }
+
+extension String: @retroactive Error {}
 
 final class API {
     let home: String
-    private(set) var token: String = ""
-    private(set) var port: Int = 1980
+    private(set) var token = ""
+    private(set) var port = 1980
 
     init() {
         let env = ProcessInfo.processInfo.environment
-        if let h = env["ZAMPP_HOME"], !h.isEmpty { home = h } else { home = NSHomeDirectory() + "/.zampp" }
+        home = (env["ZAMPP_HOME"]?.isEmpty == false) ? env["ZAMPP_HOME"]! : NSHomeDirectory() + "/.zampp"
         reloadConfig()
     }
 
@@ -67,23 +70,19 @@ final class API {
         }.resume()
     }
 
-    func status(_ completion: @escaping (Result<Status, String>) -> Void) {
-        request("GET", "/api/v1/status", timeout: 5) { result in
+    func get<T: Decodable>(_ path: String, _ type: T.Type, timeout: TimeInterval = 10, completion: @escaping (Result<T, String>) -> Void) {
+        request("GET", path, timeout: timeout) { result in
             completion(result.flatMap { data in
-                (try? JSONDecoder().decode(Envelope<Status>.self, from: data)).map { .success($0.data) } ?? .failure("could not decode status")
+                (try? JSONDecoder().decode(Envelope<T>.self, from: data)).map { .success($0.data) } ?? .failure("could not decode \(path)")
             })
         }
     }
 }
 
-extension String: @retroactive Error {}
-
-/// Finds the zampp CLI so the app can start the API server itself.
 func findCli() -> String? {
     let env = ProcessInfo.processInfo.environment
-    var candidates = [env["ZAMPP_CLI"] ?? "", "/opt/homebrew/bin/zampp", "/usr/local/bin/zampp", NSHomeDirectory() + "/.npm-global/bin/zampp"]
-    candidates = candidates.filter { !$0.isEmpty && FileManager.default.isExecutableFile(atPath: $0) }
-    return candidates.first
+    let candidates = [env["ZAMPP_CLI"] ?? "", "/opt/homebrew/bin/zampp", "/usr/local/bin/zampp", NSHomeDirectory() + "/.npm-global/bin/zampp"]
+    return candidates.first { !$0.isEmpty && FileManager.default.isExecutableFile(atPath: $0) }
 }
 
 func makeIcon() -> NSImage {
@@ -96,74 +95,98 @@ func makeIcon() -> NSImage {
     path.lineWidth = 28
     path.lineCapStyle = .round
     path.lineJoinStyle = .round
-    path.move(to: NSPoint(x: 72, y: 176))
-    path.line(to: NSPoint(x: 184, y: 176))
-    path.line(to: NSPoint(x: 72, y: 80))
-    path.line(to: NSPoint(x: 184, y: 80))
+    path.move(to: NSPoint(x: 72, y: 176)); path.line(to: NSPoint(x: 184, y: 176)); path.line(to: NSPoint(x: 72, y: 80)); path.line(to: NSPoint(x: 184, y: 80))
     NSColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 1).setStroke()
     path.stroke()
     image.unlockFocus()
     return image
 }
 
+// MARK: - Table row (Module | PID(s) | Port(s) | Actions)
+
+let COL_MODULE: CGFloat = 150, COL_PID: CGFloat = 70, COL_PORT: CGFloat = 110
+
+func smallButton(_ title: String, _ target: AnyObject, _ sel: Selector, width: CGFloat = 64) -> NSButton {
+    let b = NSButton(title: title, target: target, action: sel)
+    b.bezelStyle = .rounded
+    b.controlSize = .small
+    b.font = NSFont.systemFont(ofSize: 11)
+    b.widthAnchor.constraint(equalToConstant: width).isActive = true
+    return b
+}
+
+func cellLabel(_ text: String, width: CGFloat, bold: Bool = false, mono: Bool = false) -> NSTextField {
+    let f = NSTextField(labelWithString: text)
+    f.font = mono ? NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular) : NSFont.systemFont(ofSize: 12, weight: bold ? .semibold : .regular)
+    f.widthAnchor.constraint(equalToConstant: width).isActive = true
+    f.lineBreakMode = .byTruncatingTail
+    return f
+}
+
 final class ServiceRow: NSView {
-    let dot = NSTextField(labelWithString: "●")
-    let name = NSTextField(labelWithString: "")
-    let version = NSTextField(labelWithString: "")
-    let ports = NSTextField(labelWithString: "")
-    let pid = NSTextField(labelWithString: "")
-    let start = NSButton(title: "Start", target: nil, action: nil)
-    let stop = NSButton(title: "Stop", target: nil, action: nil)
-    let restart = NSButton(title: "Restart", target: nil, action: nil)
-    let logs = NSButton(title: "Logs", target: nil, action: nil)
-    var serviceId = ""
+    let service: Service
+    let module = NSTextField(labelWithString: "")
+    let pid = cellLabel("", width: COL_PID, mono: true)
+    let ports = cellLabel("", width: COL_PORT, mono: true)
+    let toggle: NSButton
+    let restart: NSButton
+    let admin: NSButton
+    let config: NSButton
+    let logs: NSButton
+    var current: Service
 
     init(service: Service, target: AnyObject, action: Selector) {
+        self.service = service
+        self.current = service
+        toggle = smallButton("Start", target, action)
+        restart = smallButton("Restart", target, action)
+        admin = smallButton("Admin", target, action)
+        config = smallButton("Config", target, action)
+        logs = smallButton("Logs", target, action)
         super.init(frame: .zero)
-        serviceId = service.id
-        for b in [start, stop, restart, logs] {
-            b.bezelStyle = .rounded
-            b.controlSize = .small
-            b.font = NSFont.systemFont(ofSize: 11)
-            b.target = target
-            b.action = action
-        }
-        name.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        for f in [version, ports, pid] { f.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular); f.textColor = .secondaryLabelColor }
-        name.widthAnchor.constraint(equalToConstant: 150).isActive = true
-        version.widthAnchor.constraint(equalToConstant: 64).isActive = true
-        ports.widthAnchor.constraint(equalToConstant: 96).isActive = true
-        pid.widthAnchor.constraint(equalToConstant: 72).isActive = true
-        dot.widthAnchor.constraint(equalToConstant: 16).isActive = true
-        let stack = NSStackView(views: [dot, name, version, ports, pid, start, stop, restart, logs])
+        module.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        module.alignment = .center
+        module.drawsBackground = true
+        module.isBezeled = false
+        module.wantsLayer = true
+        module.layer?.cornerRadius = 4
+        module.widthAnchor.constraint(equalToConstant: COL_MODULE).isActive = true
+        module.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        let stack = NSStackView(views: [module, pid, ports, toggle, restart, admin, config, logs])
         stack.orientation = .horizontal
-        stack.spacing = 8
+        stack.spacing = 6
         stack.alignment = .centerY
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
         ])
-        update(service)
+        update(service, busy: false)
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func update(_ s: Service) {
-        name.stringValue = s.name
-        version.stringValue = s.version ?? "—"
-        ports.stringValue = s.ports.isEmpty ? "" : s.ports.map { ":\($0)" }.joined(separator: " ")
-        pid.stringValue = s.pid.map { "pid \($0)" } ?? ""
-        dot.textColor = s.running ? NSColor.systemGreen : (s.installed ? NSColor.systemRed : NSColor.systemOrange)
-        start.isEnabled = !s.running
-        start.title = s.installed ? "Start" : "Install"
-        stop.isEnabled = s.running
-        restart.isEnabled = s.running
-        toolTip = s.description
+    func update(_ s: Service, busy: Bool) {
+        current = s
+        module.stringValue = s.name
+        pid.stringValue = s.pid.map(String.init) ?? ""
+        ports.stringValue = s.ports.map(String.init).joined(separator: ", ")
+        // XAMPP paints the module cell green while the service runs.
+        module.backgroundColor = s.running ? NSColor.systemGreen.withAlphaComponent(0.55) : (s.installed ? NSColor.clear : NSColor.systemOrange.withAlphaComponent(0.3))
+        module.textColor = .labelColor
+        toggle.title = s.running ? "Stop" : (s.installed ? "Start" : "Install")
+        toggle.isEnabled = !busy
+        restart.isEnabled = s.running && !busy
+        admin.isEnabled = s.running
+        config.isEnabled = !s.configs.isEmpty
+        logs.isEnabled = true
+        toolTip = "\(s.description)\(s.version.map { " — v\($0)" } ?? "")"
     }
 }
+
+// MARK: - App
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let api = API()
@@ -171,16 +194,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let rowsStack = NSStackView()
     var rows: [String: ServiceRow] = [:]
     let logView = NSTextView()
-    let statusLabel = NSTextField(labelWithString: "Connecting to zampp…")
     var timer: Timer?
     var lastStatus: Status?
+    var lastRunning: [String: Bool] = [:]
     var lastServeAttempt: Date = .distantPast
     var busy: Set<String> = []
+    var startAllButton: NSButton!
+    var stopAllButton: NSButton!
+    var restartAllButton: NSButton!
+    let footer = NSTextField(labelWithString: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.applicationIconImage = makeIcon()
         buildMenu()
         buildWindow()
+        log("main", "Initializing zampp Control Panel")
+        log("main", "Home: \(api.home)")
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.refresh() }
     }
@@ -189,120 +218,160 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func buildMenu() {
         let main = NSMenu()
-        let appItem = NSMenuItem()
-        main.addItem(appItem)
+        let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About zampp", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit zampp Control Panel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
+        let stackItem = NSMenuItem(); main.addItem(stackItem)
+        let stackMenu = NSMenu(title: "Stack")
+        stackMenu.addItem(withTitle: "Start All", action: #selector(startAll), keyEquivalent: "s")
+        stackMenu.addItem(withTitle: "Stop All", action: #selector(stopAll), keyEquivalent: "x")
+        stackMenu.addItem(withTitle: "Restart All", action: #selector(restartAll), keyEquivalent: "r")
+        stackItem.submenu = stackMenu
         NSApp.mainMenu = main
     }
 
     func buildWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 540), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 600), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "zampp Control Panel"
         window.center()
-        window.minSize = NSSize(width: 700, height: 420)
+        window.minSize = NSSize(width: 820, height: 480)
 
-        let header = NSTextField(labelWithString: "Services")
-        header.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        header.textColor = .secondaryLabelColor
+        // Title bar strip like XAMPP's banner
+        let banner = NSTextField(labelWithString: "zampp Control Panel")
+        banner.font = NSFont.systemFont(ofSize: 20, weight: .bold)
+        let sub = NSTextField(labelWithString: "the open-source XAMPP")
+        sub.font = NSFont.systemFont(ofSize: 12)
+        sub.textColor = .secondaryLabelColor
+        let title = NSStackView(views: [banner, sub])
+        title.orientation = .vertical
+        title.alignment = .leading
+        title.spacing = 0
+
+        // Stack-wide controls at the fingertips
+        startAllButton = NSButton(title: "▶  Start All", target: self, action: #selector(startAll))
+        stopAllButton = NSButton(title: "■  Stop All", target: self, action: #selector(stopAll))
+        restartAllButton = NSButton(title: "↻  Restart All", target: self, action: #selector(restartAll))
+        for b in [startAllButton!, stopAllButton!, restartAllButton!] { b.bezelStyle = .rounded; b.controlSize = .large; b.font = NSFont.systemFont(ofSize: 13, weight: .semibold) }
+        startAllButton.keyEquivalent = "\r"
+        let stackButtons = NSStackView(views: [startAllButton, stopAllButton, restartAllButton])
+        stackButtons.spacing = 8
+        let top = NSStackView(views: [title, NSView(), stackButtons])
+        top.orientation = .horizontal
+        top.alignment = .centerY
+        (top.views[1]).setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        // Table header
+        let header = NSStackView(views: [
+            cellLabel("Module", width: COL_MODULE, bold: true), cellLabel("PID(s)", width: COL_PID, bold: true),
+            cellLabel("Port(s)", width: COL_PORT, bold: true), cellLabel("Actions", width: 300, bold: true),
+        ])
+        header.spacing = 6
+        header.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 2, right: 8)
+        for v in header.views { (v as? NSTextField)?.textColor = .secondaryLabelColor; (v as? NSTextField)?.alignment = v === header.views[0] ? .center : .left }
 
         rowsStack.orientation = .vertical
-        rowsStack.spacing = 2
+        rowsStack.spacing = 0
         rowsStack.alignment = .leading
-        let rowsBox = NSBox()
-        rowsBox.boxType = .custom
-        rowsBox.cornerRadius = 8
-        rowsBox.borderColor = NSColor.separatorColor
-        rowsBox.fillColor = NSColor.controlBackgroundColor
-        rowsBox.contentViewMargins = .zero
-        rowsBox.contentView = rowsStack
-        rowsStack.translatesAutoresizingMaskIntoConstraints = false
-        if let cv = rowsBox.contentView {
+        let table = NSStackView(views: [header, rowsStack])
+        table.orientation = .vertical
+        table.spacing = 0
+        table.alignment = .leading
+        let tableBox = NSBox()
+        tableBox.boxType = .custom
+        tableBox.cornerRadius = 6
+        tableBox.borderColor = .separatorColor
+        tableBox.fillColor = .controlBackgroundColor
+        tableBox.contentViewMargins = .zero
+        tableBox.contentView = table
+        table.translatesAutoresizingMaskIntoConstraints = false
+        if let cv = tableBox.contentView {
             NSLayoutConstraint.activate([
-                rowsStack.leadingAnchor.constraint(equalTo: cv.leadingAnchor),
-                rowsStack.trailingAnchor.constraint(equalTo: cv.trailingAnchor),
-                rowsStack.topAnchor.constraint(equalTo: cv.topAnchor, constant: 4),
-                rowsStack.bottomAnchor.constraint(equalTo: cv.bottomAnchor, constant: -4),
+                table.leadingAnchor.constraint(equalTo: cv.leadingAnchor), table.trailingAnchor.constraint(equalTo: cv.trailingAnchor),
+                table.topAnchor.constraint(equalTo: cv.topAnchor), table.bottomAnchor.constraint(equalTo: cv.bottomAnchor, constant: -4),
             ])
         }
 
-        func button(_ title: String, _ sel: Selector, primary: Bool = false) -> NSButton {
+        // Right-hand tool column (XAMPP: Config, Netstat, Shell, Explorer, Services, Help, Quit)
+        func tool(_ title: String, _ sel: Selector) -> NSButton {
             let b = NSButton(title: title, target: self, action: sel)
             b.bezelStyle = .rounded
-            if primary { b.keyEquivalent = "\r" }
+            b.widthAnchor.constraint(equalToConstant: 100).isActive = true
             return b
         }
-        let actions = NSStackView(views: [
-            button("Start All", #selector(startAll), primary: true),
-            button("Stop All", #selector(stopAll)),
-            NSView(),
-            button("Localhost", #selector(openWeb)),
-            button("Database", #selector(openDb)),
-            button("Mail", #selector(openMail)),
-            button("Web Panel", #selector(openPanel)),
-            button("Doctor", #selector(runDoctor)),
-            button("Folder", #selector(openHome)),
+        let tools = NSStackView(views: [
+            tool("Config", #selector(openConfigDir)), tool("Netstat", #selector(netstat)), tool("Shell", #selector(openShell)),
+            tool("Explorer", #selector(openExplorer)), tool("Web Panel", #selector(openPanel)), tool("Doctor", #selector(runDoctor)),
+            tool("Help", #selector(openHelp)), tool("Quit", #selector(quit)),
         ])
-        actions.orientation = .horizontal
-        actions.spacing = 8
-        actions.distribution = .fill
-        (actions.views[2]).setContentHuggingPriority(.defaultLow, for: .horizontal)
+        tools.orientation = .vertical
+        tools.spacing = 6
+        tools.alignment = .centerX
 
+        let middle = NSStackView(views: [tableBox, tools])
+        middle.orientation = .horizontal
+        middle.alignment = .top
+        middle.spacing = 12
+
+        // Log
         logView.isEditable = false
         logView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        logView.textColor = .labelColor
-        logView.backgroundColor = NSColor.textBackgroundColor
+        logView.backgroundColor = .textBackgroundColor
         logView.textContainerInset = NSSize(width: 6, height: 6)
+        logView.autoresizingMask = [.width]
+        logView.isVerticallyResizable = true
+        logView.textContainer?.widthTracksTextView = true
         let scroll = NSScrollView()
         scroll.documentView = logView
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
-        logView.autoresizingMask = [.width]
-        logView.isVerticallyResizable = true
-        logView.textContainer?.widthTracksTextView = true
-        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
 
-        statusLabel.font = NSFont.systemFont(ofSize: 11)
-        statusLabel.textColor = .secondaryLabelColor
+        footer.font = NSFont.systemFont(ofSize: 11)
+        footer.textColor = .secondaryLabelColor
 
-        let root = NSStackView(views: [header, rowsBox, actions, scroll, statusLabel])
+        let root = NSStackView(views: [top, middle, scroll, footer])
         root.orientation = .vertical
-        root.spacing = 10
         root.alignment = .leading
-        root.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 12, right: 14)
+        root.spacing = 10
+        root.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 10, right: 14)
         root.translatesAutoresizingMaskIntoConstraints = false
         let content = NSView()
         content.addSubview(root)
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            root.topAnchor.constraint(equalTo: content.topAnchor),
-            root.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            rowsBox.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -28),
-            actions.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -28),
+            root.leadingAnchor.constraint(equalTo: content.leadingAnchor), root.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            root.topAnchor.constraint(equalTo: content.topAnchor), root.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            top.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -28),
+            middle.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -28),
             scroll.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -28),
         ])
         window.contentView = content
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        log("zampp Control Panel. Home: \(api.home)")
     }
 
-    func log(_ message: String) {
-        let stamp = DateFormatter()
-        stamp.dateFormat = "HH:mm:ss"
-        let line = "[\(stamp.string(from: Date()))] \(message)\n"
+    // MARK: Log
+
+    enum Tone { case normal, status, error }
+    func log(_ module: String, _ message: String, _ tone: Tone = .normal) {
+        let fmt = DateFormatter(); fmt.dateFormat = "HH:mm:ss"
+        let color: NSColor = tone == .error ? .systemRed : (tone == .status ? .systemBlue : .labelColor)
+        let line = NSMutableAttributedString(string: "\(fmt.string(from: Date()))  ", attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor])
+        line.append(NSAttributedString(string: "[\(module)]".padding(toLength: 16, withPad: " ", startingAt: 0), attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold), .foregroundColor: color]))
+        line.append(NSAttributedString(string: "\(message)\n", attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: color]))
         DispatchQueue.main.async {
-            self.logView.textStorage?.append(NSAttributedString(string: line, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.labelColor]))
+            self.logView.textStorage?.append(line)
             self.logView.scrollToEndOfDocument(nil)
         }
     }
 
+    // MARK: Refresh
+
     func refresh() {
-        api.status { [weak self] result in
+        api.get("/api/v1/status", Status.self, timeout: 5) { [weak self] result in
             guard let self = self else { return }
             DispatchQueue.main.async {
                 switch result {
@@ -310,45 +379,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.lastStatus = status
                     self.render(status)
                     let running = status.services.filter { $0.running }.count
-                    self.statusLabel.stringValue = "zampp \(status.version) · \(running)/\(status.services.count) services running · API 127.0.0.1:\(self.api.port)"
+                    self.footer.stringValue = "zampp \(status.version)   ·   \(running) of \(status.services.count) services running   ·   API 127.0.0.1:\(self.api.port)   ·   \(status.urls.web)"
+                    self.startAllButton.isEnabled = running < status.services.count
+                    self.stopAllButton.isEnabled = running > 0
+                    self.restartAllButton.isEnabled = running > 0
                 case .failure(let message):
-                    self.statusLabel.stringValue = "API not reachable (\(message))"
+                    self.footer.stringValue = "API not reachable (\(message))"
                     self.ensureApiRunning()
                 }
             }
         }
     }
 
-    /// If the API is down, start `zampp serve` ourselves (once every 10 seconds at most).
     func ensureApiRunning() {
         guard Date().timeIntervalSince(lastServeAttempt) > 10 else { return }
         lastServeAttempt = Date()
         api.reloadConfig()
         guard let cli = findCli() else {
-            log("The zampp API is not running and the `zampp` command was not found. Run `zampp ui` in a terminal.")
+            log("main", "API not running and the zampp command was not found. Run `zampp ui` in a terminal.", .error)
             return
         }
-        log("Starting the zampp API (\(cli) serve)…")
+        log("main", "Starting the zampp API: \(cli) serve", .status)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: cli)
         p.arguments = ["serve"]
         let logFile = api.home + "/logs/panel.out.log"
-        FileManager.default.createFile(atPath: logFile, contents: nil)
-        if let handle = FileHandle(forWritingAtPath: logFile) {
-            handle.seekToEndOfFile()
-            p.standardOutput = handle
-            p.standardError = handle
-        }
-        do { try p.run() } catch { log("Could not start the API: \(error.localizedDescription)") }
+        if !FileManager.default.fileExists(atPath: logFile) { FileManager.default.createFile(atPath: logFile, contents: nil) }
+        if let handle = FileHandle(forWritingAtPath: logFile) { handle.seekToEndOfFile(); p.standardOutput = handle; p.standardError = handle }
+        do { try p.run() } catch { log("main", "Could not start the API: \(error.localizedDescription)", .error) }
     }
 
     func render(_ status: Status) {
         var seen = Set<String>()
         for (index, service) in status.services.enumerated() {
             seen.insert(service.id)
+            if let was = lastRunning[service.id], was != service.running {
+                log(service.name, "Status change detected: \(service.running ? "running" : "stopped")", .status)
+            }
+            lastRunning[service.id] = service.running
             if let row = rows[service.id] {
-                row.update(service)
-                if busy.contains(service.id) { [row.start, row.stop, row.restart].forEach { $0.isEnabled = false } }
+                row.update(service, busy: busy.contains(service.id))
             } else {
                 let row = ServiceRow(service: service, target: self, action: #selector(rowAction(_:)))
                 rows[service.id] = row
@@ -357,91 +427,142 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         for (id, row) in rows where !seen.contains(id) {
-            rowsStack.removeArrangedSubview(row)
-            row.removeFromSuperview()
-            rows.removeValue(forKey: id)
+            rowsStack.removeArrangedSubview(row); row.removeFromSuperview(); rows.removeValue(forKey: id)
         }
     }
+
+    // MARK: Row actions
 
     @objc func rowAction(_ sender: NSButton) {
-        guard let row = sender.superview?.superview as? ServiceRow ?? sender.superview as? ServiceRow else { return }
-        let id = row.serviceId
-        if sender == row.logs {
-            open(path: api.home + "/logs")
-            return
+        guard let row = rows.values.first(where: { [$0.toggle, $0.restart, $0.admin, $0.config, $0.logs].contains(sender) }) else { return }
+        let s = row.current
+        switch sender {
+        case row.toggle: serviceAction(s, s.running ? "stop" : "start")
+        case row.restart: serviceAction(s, "restart")
+        case row.admin: openAdmin(s)
+        case row.config:
+            if let c = s.configs.first { NSWorkspace.shared.open(URL(fileURLWithPath: c.path)); log(s.name, "Opening \(c.path)") }
+        case row.logs:
+            let path = s.logs.first(where: { $0.name == "error" || $0.name == "php-fpm" })?.path ?? s.logs.first?.path ?? api.home + "/logs"
+            openInConsole(path); log(s.name, "Opening \(path)")
+        default: break
         }
-        let action = sender == row.start ? "start" : sender == row.stop ? "stop" : "restart"
-        serviceAction(id, action)
     }
 
-    func serviceAction(_ id: String, _ action: String) {
-        busy.insert(id)
-        if let s = lastStatus { render(s) }
-        log("\(action) \(id)…")
-        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
-        api.request("POST", "/api/v1/services/\(encoded)/\(action)") { [weak self] result in
+    func openAdmin(_ s: Service) {
+        guard let st = lastStatus else { return }
+        let url: String
+        if s.id == "apache" { url = st.urls.web }
+        else if s.id == "mariadb" { url = st.urls.adminer }
+        else if s.id == "mailpit" { url = st.urls.mail }
+        else if s.id.hasPrefix("php-fpm") { url = st.urls.web + "phpinfo.php" }
+        else { url = st.urls.web }
+        log(s.name, "Opening \(url)")
+        if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+    }
+
+    func serviceAction(_ s: Service, _ action: String) {
+        busy.insert(s.id)
+        if let st = lastStatus { render(st) }
+        log(s.name, "Attempting to \(action) \(s.name)" + (s.installed ? "…" : " (installing first)…"))
+        let encoded = s.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? s.id
+        api.request("POST", "/api/v1/services/\(encoded)/\(action)", timeout: 600) { [weak self] result in
             guard let self = self else { return }
             DispatchQueue.main.async {
-                self.busy.remove(id)
-                switch result {
-                case .success: self.log("\(id): \(action) ok")
-                case .failure(let message): self.log("\(id): \(message)")
-                }
+                self.busy.remove(s.id)
+                if case .failure(let message) = result { self.log(s.name, "Error: \(message)", .error) }
                 self.refresh()
             }
         }
     }
 
+    // MARK: Stack actions
+
     @objc func startAll() {
-        log("Starting the stack (installs anything missing)…")
-        api.request("POST", "/api/v1/stack/start", timeout: 600) { [weak self] result in
+        log("main", "Starting all services (anything missing is installed first)…", .status)
+        [startAllButton, stopAllButton, restartAllButton].forEach { $0?.isEnabled = false }
+        api.request("POST", "/api/v1/stack/start", timeout: 900) { [weak self] result in
             guard let self = self else { return }
             switch result {
             case .success(let data):
                 if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let inner = json["data"] as? [String: Any],
                    let failed = inner["failed"] as? [[String: Any]], !failed.isEmpty {
-                    for f in failed { self.log("\(f["id"] ?? ""): \(f["error"] ?? "")") }
-                } else {
-                    self.log("Stack started")
-                }
-            case .failure(let message): self.log("Start failed: \(message)")
+                    for f in failed { self.log("\(f["id"] ?? "")", "Error: \(f["error"] ?? "")", .error) }
+                } else { self.log("main", "All services started") }
+            case .failure(let message): self.log("main", "Error: \(message)", .error)
             }
             DispatchQueue.main.async { self.refresh() }
         }
     }
 
     @objc func stopAll() {
-        log("Stopping all services…")
+        log("main", "Stopping all services…", .status)
         api.request("POST", "/api/v1/stack/stop") { [weak self] result in
-            if case .failure(let m) = result { self?.log("Stop failed: \(m)") } else { self?.log("All services stopped") }
+            if case .failure(let m) = result { self?.log("main", "Error: \(m)", .error) } else { self?.log("main", "All services stopped") }
             DispatchQueue.main.async { self?.refresh() }
         }
     }
 
-    @objc func runDoctor() {
-        api.request("GET", "/api/v1/doctor") { [weak self] result in
-            guard let self = self else { return }
-            switch result {
-            case .success(let data):
-                if let checks = try? JSONDecoder().decode(Envelope<[Check]>.self, from: data).data {
-                    for c in checks {
-                        let icon = c.level == "ok" ? "✔" : (c.level == "warn" ? "!" : "✖")
-                        self.log("\(icon) \(c.title): \(c.detail)\(c.fix.map { " → \($0)" } ?? "")")
-                    }
-                }
-            case .failure(let message): self.log("Doctor failed: \(message)")
+    @objc func restartAll() {
+        log("main", "Restarting all services…", .status)
+        api.request("POST", "/api/v1/stack/stop") { [weak self] _ in
+            self?.api.request("POST", "/api/v1/stack/start", timeout: 900) { result in
+                if case .failure(let m) = result { self?.log("main", "Error: \(m)", .error) } else { self?.log("main", "All services restarted") }
+                DispatchQueue.main.async { self?.refresh() }
             }
         }
     }
 
-    func open(url: String) { if let u = URL(string: url) { NSWorkspace.shared.open(u) } }
-    func open(path: String) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-    @objc func openWeb() { open(url: lastStatus?.urls.web ?? "http://localhost:8080/") }
-    @objc func openDb() { open(url: lastStatus?.urls.adminer ?? "http://localhost:8080/adminer/") }
-    @objc func openMail() { open(url: lastStatus?.urls.mail ?? "http://127.0.0.1:8025/") }
-    @objc func openPanel() { open(url: "\(api.base)/?token=\(api.token)") }
-    @objc func openHome() { open(path: api.home) }
+    // MARK: Tools
+
+    @objc func openConfigDir() { NSWorkspace.shared.open(URL(fileURLWithPath: api.home + "/etc")); log("main", "Opening \(api.home)/etc") }
+    @objc func openExplorer() { NSWorkspace.shared.open(URL(fileURLWithPath: api.home + "/www")); log("main", "Opening \(api.home)/www") }
+    @objc func openShell() {
+        let script = "tell application \"Terminal\"\nactivate\ndo script \"cd '\(api.home)' && zampp status\"\nend tell"
+        NSAppleScript(source: script)?.executeAndReturnError(nil)
+        log("main", "Opening a shell in \(api.home)")
+    }
+    @objc func openPanel() { if let u = URL(string: "\(api.base)/?token=\(api.token)") { NSWorkspace.shared.open(u) } }
+    @objc func openHelp() { if let u = URL(string: "https://github.com/MHK-26/zampp#readme") { NSWorkspace.shared.open(u) } }
+    @objc func quit() { NSApp.terminate(nil) }
+
+    @objc func netstat() {
+        log("main", "TCP listening sockets:", .status)
+        api.get("/api/v1/ports", [Listener].self) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let listeners):
+                for l in listeners.sorted(by: { $0.port < $1.port }) {
+                    self.log("netstat", String(format: "%-6d %-22@ %@ (pid %d)", l.port, l.address as NSString, l.command, l.pid))
+                }
+            case .failure(let m): self.log("netstat", "Error: \(m)", .error)
+            }
+        }
+    }
+
+    @objc func runDoctor() {
+        log("main", "Running doctor…", .status)
+        api.get("/api/v1/doctor", [Check].self, timeout: 30) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let checks):
+                for c in checks {
+                    let icon = c.level == "ok" ? "✔" : (c.level == "warn" ? "!" : "✖")
+                    self.log("doctor", "\(icon) \(c.title): \(c.detail)\(c.fix.map { " → \($0)" } ?? "")", c.level == "fail" ? .error : .normal)
+                }
+            case .failure(let m): self.log("doctor", "Error: \(m)", .error)
+            }
+        }
+    }
+
+    func openInConsole(_ path: String) {
+        if FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Console.app"), configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        } else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: api.home + "/logs"))
+        }
+    }
 }
 
 let app = NSApplication.shared

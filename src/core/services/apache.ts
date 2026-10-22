@@ -8,6 +8,7 @@ import { tcpReachable } from '../supervisor.ts'
 import { defaultPhp, phpSocket } from '../php.ts'
 import { writeSiteConfigs, anySiteUsesTls } from '../sites.ts'
 import { writeWelcomeSite } from '../www.ts'
+import { certificateFiles } from '../tls.ts'
 import type { ServiceDefinition, Resolved, Launch, NamedFile } from './types.ts'
 
 const execFileAsync = promisify(execFile)
@@ -117,6 +118,8 @@ export const apacheService: ServiceDefinition = {
       tls,
       modules,
       phpSocket: php ? phpSocket(ctx, php.version) : '',
+      localhostCert: tls && (await exists(certificateFiles(ctx, 'localhost').cert)) ? certificateFiles(ctx, 'localhost').cert : '',
+      localhostKey: tls && (await exists(certificateFiles(ctx, 'localhost').key)) ? certificateFiles(ctx, 'localhost').key : '',
     })
     await writeFile(httpdConfPath(ctx), conf, 'utf8')
     return { command: resolved.command, args: ['-f', httpdConfPath(ctx), '-D', 'FOREGROUND'] }
